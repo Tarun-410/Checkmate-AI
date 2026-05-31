@@ -35,6 +35,25 @@ export function ChessBoardComponent({ onLiveMove, showSuggestions = true }: Ches
     liveSuggestedMove,
   } = useAnalysisStore();
 
+  const validLiveSuggestion = useMemo(() => {
+    if (gameMode !== 'play' || !liveSuggestedMove || liveSuggestedMove.length < 4) return null;
+
+    try {
+      const chess = new Chess(liveCurrentFen);
+      const from = liveSuggestedMove.slice(0, 2) as Square;
+      const to = liveSuggestedMove.slice(2, 4) as Square;
+      const promotion = liveSuggestedMove.slice(4, 5) || undefined;
+      const move = chess.move({ from, to, promotion });
+      if (!move) return null;
+      return {
+        from,
+        to,
+      };
+    } catch {
+      return null;
+    }
+  }, [gameMode, liveCurrentFen, liveSuggestedMove]);
+
   // Derive board FEN
   const boardFen = useMemo(() => {
     if (gameMode === 'play') {
@@ -86,10 +105,8 @@ export function ChessBoardComponent({ onLiveMove, showSuggestions = true }: Ches
   const boardArrows = useMemo(() => {
     if (!showSuggestions) return [];
     if (gameMode === 'play') {
-      if (liveSuggestedMove && liveSuggestedMove.length >= 4) {
-        const from = liveSuggestedMove.slice(0, 2) as Square;
-        const to = liveSuggestedMove.slice(2, 4) as Square;
-        return [[from, to, '#22c55e']];
+      if (validLiveSuggestion) {
+        return [[validLiveSuggestion.from, validLiveSuggestion.to]];
       }
       return [];
     }
@@ -104,10 +121,10 @@ export function ChessBoardComponent({ onLiveMove, showSuggestions = true }: Ches
     if (uci.length >= 4) {
       const from = uci.slice(0, 2) as Square;
       const to = uci.slice(2, 4) as Square;
-      return [[from, to, '#22c55e']] as [Square, Square, string][];
+      return [[from, to]];
     }
     return [];
-  }, [gameMode, liveSuggestedMove, analysisResult, currentMoveIndex, showSuggestions]);
+  }, [gameMode, validLiveSuggestion, analysisResult, currentMoveIndex, showSuggestions]);
 
   // Handle piece dragging validity
   const isDraggablePiece = useCallback(
@@ -170,7 +187,8 @@ export function ChessBoardComponent({ onLiveMove, showSuggestions = true }: Ches
         boardOrientation="white"
         areArrowsAllowed={false}
         customSquareStyles={squareStyles}
-        customArrows={boardArrows as any}
+        customArrows={boardArrows}
+        customArrowColor="#22c55e"
         customLightSquareStyle={BOARD_COLORS.lightSquareStyle}
         customDarkSquareStyle={BOARD_COLORS.darkSquareStyle}
         customBoardStyle={{

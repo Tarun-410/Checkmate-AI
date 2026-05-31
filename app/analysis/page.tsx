@@ -11,6 +11,11 @@ import { CoachingChat, MarkdownRenderer } from '@/components/coaching/CoachingCh
 import { useAnalysisStore } from '@/store/analysis-store';
 import { Chess } from 'chess.js';
 import { formatEval } from '@/lib/chess/mistake-detector';
+import {
+  COACH_DIFFICULTIES,
+  DEFAULT_COACH_DIFFICULTY,
+  getCoachDifficultyById,
+} from '@/lib/chess/coach-difficulty';
 import type { ChessMove } from '@/types';
 import {
   ChevronLeft,
@@ -60,6 +65,29 @@ export default function AnalysisPage() {
   const [activeTab, setActiveTab] = useState<ActiveTab>('input');
   const [showSuggestions, setShowSuggestions] = useState(true);
   const [isBotThinking, setIsBotThinking] = useState(false);
+  const [coachDifficulty, setCoachDifficulty] = useState(DEFAULT_COACH_DIFFICULTY);
+
+  const coachRating = getCoachDifficultyById(coachDifficulty).rating;
+
+  const resolveLegalSuggestion = (fen: string, uci?: string | null) => {
+    if (!uci || uci.length < 4) return null;
+
+    try {
+      const chess = new Chess(fen);
+      const from = uci.slice(0, 2);
+      const to = uci.slice(2, 4);
+      const promotion = uci.slice(4, 5) || undefined;
+      const move = chess.move({ from, to, promotion });
+      if (!move) return null;
+
+      return {
+        uci: `${from}${to}${promotion ?? ''}`,
+        san: move.san,
+      };
+    } catch {
+      return null;
+    }
+  };
 
   // Dynamic moves helper based on gameMode
   const moves = useMemo(() => {
@@ -184,12 +212,12 @@ export default function AnalysisPage() {
       const response = await fetch('/api/coach', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          message,
-          playerRating: 1200,
-          currentFen: move.fen,
-          currentMoveContext,
-          sessionHistory: [],
+          body: JSON.stringify({
+            message,
+            playerRating: coachRating,
+            currentFen: move.fen,
+            currentMoveContext,
+            sessionHistory: [],
         }),
       });
 
@@ -248,11 +276,11 @@ export default function AnalysisPage() {
       const response = await fetch('/api/analyze', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          positions: currentPositions,
-          playerRating: 1200,
-        }),
-      });
+          body: JSON.stringify({
+            positions: currentPositions,
+            playerRating: coachRating,
+          }),
+        });
 
       if (!response.ok) throw new Error('Analysis failed');
       const result = await response.json();
@@ -264,8 +292,9 @@ export default function AnalysisPage() {
       if (playerMove) {
         setCurrentMoveIndex(enrichedMoves.length - 1);
         setLiveClassification(playerMove.mistakeType);
-        setLiveSuggestedMove(playerMove.bestMove || null);
-        setLiveSuggestedMoveSan(playerMove.bestMoveSan || null);
+        const playerSuggestion = resolveLegalSuggestion(liveCurrentFen, playerMove.bestMove);
+        setLiveSuggestedMove(playerSuggestion?.uci ?? null);
+        setLiveSuggestedMoveSan(playerSuggestion?.san ?? null);
 
         // Stream Coach commentary
         const feedback = await streamLiveCoachFeedback(playerMove);
@@ -358,7 +387,7 @@ export default function AnalysisPage() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             positions: botPositions,
-            playerRating: 1200,
+            playerRating: coachRating,
           }),
         });
 
@@ -372,8 +401,9 @@ export default function AnalysisPage() {
         if (botMove) {
           setCurrentMoveIndex(enrichedBotMoves.length - 1);
           setLiveClassification(botMove.mistakeType);
-          setLiveSuggestedMove(botMove.bestMove || null);
-          setLiveSuggestedMoveSan(botMove.bestMoveSan || null);
+          const botSuggestion = resolveLegalSuggestion(botMoveFen, botMove.bestMove);
+          setLiveSuggestedMove(botSuggestion?.uci ?? null);
+          setLiveSuggestedMoveSan(botSuggestion?.san ?? null);
 
           // Stream Coach commentary for bot move
           const feedback = await streamLiveCoachFeedback(botMove);
@@ -625,6 +655,22 @@ export default function AnalysisPage() {
                           </p>
 
                           <div className="bg-[rgba(15,15,26,0.4)] border border-[rgba(148,163,184,0.06)] rounded-xl p-4 max-w-[320px] mx-auto w-full mb-6 space-y-3.5 text-left">
+                            <div className="space-y-1.5">
+                              <label className="text-xs font-semibold text-[#94a3b8]">
+                                Coach Difficulty
+                              </label>
+                              <select
+                                value={coachDifficulty}
+                                onChange={(e) => setCoachDifficulty(e.target.value as typeof coachDifficulty)}
+                                className="w-full px-3 py-2 rounded-lg bg-[rgba(8,8,16,0.8)] border border-[rgba(148,163,184,0.12)] text-xs font-medium text-[#f1f5f9] focus:outline-none focus:border-[rgba(124,58,237,0.45)] focus:ring-1 focus:ring-[rgba(124,58,237,0.2)]"
+                              >
+                                {COACH_DIFFICULTIES.map((difficulty) => (
+                                  <option key={difficulty.id} value={difficulty.id}>
+                                    {difficulty.label} ({difficulty.rating} rating)
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
                             <div className="flex items-center justify-between">
                               <label className="text-xs font-semibold text-[#94a3b8]">
                                 Player Color
@@ -799,15 +845,32 @@ export default function AnalysisPage() {
 
                           {/* Bottom Settings & Control Panel */}
                           <div className="flex items-center justify-between gap-4 pt-2 border-t border-[rgba(148,163,184,0.04)] flex-wrap">
-                            <label className="flex items-center gap-2 text-xs text-[#475569] cursor-pointer hover:text-[#94a3b8] transition-colors select-none">
-                              <input
-                                type="checkbox"
-                                checked={showSuggestions}
-                                onChange={(e) => setShowSuggestions(e.target.checked)}
-                                className="w-3.5 h-3.5 rounded border-[rgba(148,163,184,0.2)] text-[#7c3aed] bg-[rgba(8,8,16,0.8)] focus:ring-0 focus:ring-offset-0 cursor-pointer"
-                              />
-                              Show suggestions
-                            </label>
+                            <div className="flex items-center gap-3 flex-wrap">
+                              <label className="flex items-center gap-2 text-xs text-[#475569] cursor-pointer hover:text-[#94a3b8] transition-colors select-none">
+                                <input
+                                  type="checkbox"
+                                  checked={showSuggestions}
+                                  onChange={(e) => setShowSuggestions(e.target.checked)}
+                                  className="w-3.5 h-3.5 rounded border-[rgba(148,163,184,0.2)] text-[#7c3aed] bg-[rgba(8,8,16,0.8)] focus:ring-0 focus:ring-offset-0 cursor-pointer"
+                                />
+                                Show suggestions
+                              </label>
+
+                              <label className="flex items-center gap-2 text-xs text-[#475569] cursor-pointer hover:text-[#94a3b8] transition-colors select-none">
+                                <span className="font-semibold">Difficulty</span>
+                                <select
+                                  value={coachDifficulty}
+                                  onChange={(e) => setCoachDifficulty(e.target.value as typeof coachDifficulty)}
+                                  className="px-2.5 py-1.5 rounded-lg bg-[rgba(8,8,16,0.8)] border border-[rgba(148,163,184,0.12)] text-[11px] font-medium text-[#f1f5f9] focus:outline-none focus:border-[rgba(124,58,237,0.45)] focus:ring-1 focus:ring-[rgba(124,58,237,0.2)]"
+                                >
+                                  {COACH_DIFFICULTIES.map((difficulty) => (
+                                    <option key={difficulty.id} value={difficulty.id}>
+                                      {difficulty.label}
+                                    </option>
+                                  ))}
+                                </select>
+                              </label>
+                            </div>
 
                             <button
                               onClick={() => {
@@ -877,7 +940,7 @@ export default function AnalysisPage() {
 
                   {activeTab === 'coach' && (
                     <div className="flex-1 flex flex-col min-h-0 h-full">
-                      <CoachingChat />
+                      <CoachingChat playerRating={coachRating} />
                     </div>
                   )}
                 </motion.div>

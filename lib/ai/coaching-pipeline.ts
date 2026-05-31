@@ -4,6 +4,7 @@
 // ============================================================
 import OpenAI from 'openai';
 import type { CoachingMessage, MistakeType } from '@/types';
+import { getCoachDifficultyByRating } from '@/lib/chess/coach-difficulty';
 
 const provider = process.env.CHATBOT_PROVIDER ?? 'openai';
 const isGroq = provider === 'groq';
@@ -37,19 +38,13 @@ export const isAiConfigured = !!apiKey;
  * Adapts language complexity for beginners vs. advanced players
  */
 function getCoachingSystemPrompt(playerRating?: number): string {
-  const level =
-    !playerRating ? 'intermediate'
-    : playerRating < 800 ? 'complete beginner'
-    : playerRating < 1200 ? 'beginner'
-    : playerRating < 1600 ? 'intermediate'
-    : playerRating < 2000 ? 'advanced'
-    : 'expert';
+  const difficulty = getCoachDifficultyByRating(playerRating);
 
   return `You are Checkmate AI, a friendly and encouraging chess coach.
-You are coaching a ${level} chess player${playerRating ? ` (rated ~${playerRating})` : ''}.
+You are coaching a ${difficulty.label} chess player${playerRating ? ` (rated ~${playerRating})` : ''}.
 
 Your coaching style:
-- Use clear, conversational language appropriate for a ${level}
+- Use clear, conversational language appropriate for a ${difficulty.label} player
 - ${playerRating && playerRating < 1000 ? 'Avoid technical jargon. Explain everything simply.' : 'Use some chess terminology but always explain it.'}
 - Be encouraging and constructive — mistakes are learning opportunities
 - Focus on WHY a move is bad, not just WHAT the best move is

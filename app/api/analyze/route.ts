@@ -4,6 +4,7 @@
 // calls OpenAI for explanations, returns structured results
 // ============================================================
 import { NextRequest, NextResponse } from 'next/server';
+import { Chess } from 'chess.js';
 import { generateMistakeExplanations, isAiConfigured } from '@/lib/ai/coaching-pipeline';
 import {
   buildMovesWithClassification,
@@ -32,7 +33,7 @@ export async function POST(req: NextRequest) {
     // In production, Stockfish runs client-side via WASM.
     // Here we generate realistic evaluations server-side for demo.
     // =========================================================
-    const evaluations = generateMockStockfishEvals(positions.length);
+    const evaluations = generateMockStockfishEvals(positions);
 
     // =========================================================
     // STEP 2: Build ChessMove objects with mistake classification
@@ -109,11 +110,11 @@ export async function POST(req: NextRequest) {
  * Generate realistic mock Stockfish evaluations for demo mode
  * Simulates a real game with some blunders and positional swings
  */
-function generateMockStockfishEvals(count: number) {
+function generateMockStockfishEvals(positions: Array<{ fen: string }>) {
   let score = 0;
   const evals = [];
 
-  for (let i = 0; i < count; i++) {
+  for (let i = 0; i < positions.length; i++) {
     // Gradual drift
     const drift = (Math.random() - 0.48) * 20;
     // Occasional tactical swing (8% chance)
@@ -121,16 +122,57 @@ function generateMockStockfishEvals(count: number) {
     const swing = isTactical ? (Math.random() - 0.3) * 400 : 0;
     score = Math.max(-900, Math.min(900, score + drift + swing));
 
-    // Choose a realistic best move (UCI format: from-to)
-    const moves = ['e2e4', 'e7e5', 'd2d4', 'd7d5', 'g1f3', 'b8c6', 'f1c4', 'g8f6'];
-    const bestMove = moves[i % moves.length];
+    // Choose a legal best move for the actual position so suggestions stay grounded.
+    const bestMove = pickMockBestMove(positions[i].fen);
 
     evals.push({
       score: Math.round(score),
-      bestMove,
-      bestMoveSan: bestMove.slice(2),
+      bestMove: bestMove?.uci ?? '(none)',
+      bestMoveSan: bestMove?.san,
     });
   }
 
   return evals;
+}
+
+function pickMockBestMove(fen: string): { uci: string; san: string } | null {
+  try {
+    const chess = new Chess(fen);
+    if (chess.isGameOver()) return null;
+
+    const legalMoves = chess.moves({ verbose: true }) as Array<{
+      from: string;
+      to: string;
+      promotion?: string;
+      san: string;
+      captured?: string;
+      check?: boolean;
+      piece?: string;
+    }>;
+
+    if (legalMoves.length === 0) return null;
+
+    const scoredMoves = legalMoves
+      .map((move) => {
+        let score = 0;
+        if (move.captured) score += 3;
+        if (move.promotion) score += 3;
+        if (move.check) score += 2;
+        if (move.san.includes('#')) score += 4;
+        if (move.piece === 'p') score += 1;
+        return { move, score };
+      })
+      .sort((a, b) => {
+        if (b.score !== a.score) return b.score - a.score;
+        return a.move.san.localeCompare(b.move.san);
+      });
+
+    const move = scoredMoves[0]?.move ?? legalMoves[0];
+    return {
+      uci: `${move.from}${move.to}${move.promotion ?? ''}`,
+      san: move.san,
+    };
+  } catch {
+    return null;
+  }
 }
