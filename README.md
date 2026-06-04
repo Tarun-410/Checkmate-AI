@@ -100,4 +100,4 @@ This project was built as a learning project to explore AI-assisted product deve
 
 **Tarun Patil**
 * **GitHub**: [Tarun-410](https://github.com/Tarun-410)
-* **Email**: githubtarun410@gmail.com
+* **Email**: tarunckpatil2007@outlook.com
